@@ -1,0 +1,32 @@
+{
+  "keyword": "Java",
+  "area": ["台北市", "新北市"],
+  "jobcat": ["軟體工程師", "後端工程師", "全端工程師"],
+
+  "include_keyword": [],
+  "exclude_keyword": [],
+
+  "include_industry": [],
+  "exclude_industry": ["人力派遣", "銀行", "保險"],
+
+  "include_company": [],
+  "exclude_company": [
+    "新加坡商易呈", "英屬維", "鴻揚", "大學", "醫院", "國泰", "保險", "顧問",
+    "博彥", "威普羅", "塔塔", "印福思", "人力", "人事", "安復仕", "普鴻",
+    "祐安", "碩誠", "神通", "德義", "明瑞資通", "緯德", "艾力特", "精誠",
+    "資拓", "凌群", "叡揚", "台灣大哥", "藝珂", "元大金融"
+  ],
+
+  "include_title": [],
+  "exclude_title": [
+    "嵌入式", "CAD", ".Net", "C#", "韌體", "ERP", "ASP.NET", "iOS", "PHP",
+    "Android", "IOS", "BPM", "Embedded", "助理", "替代役", "無經驗",
+    "新鮮人", "Intern", "駐點", "測試", "Test", "實習生", "業務", "顧問",
+    "Consultant", "派駐"
+  ],
+  "exclude_url": [],
+  "exclude_url_file": "seen.example.txt",
+
+  "group": true,
+  "xlsx": "output.xlsx"
+}

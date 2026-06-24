@@ -8,6 +8,7 @@ Chrome 的 TLS/JA3 指紋以通過挑戰。
 
 import argparse
 import os
+import re
 import sys
 import time
 
@@ -386,6 +387,125 @@ def dedupe_jobs(jobs):
     return unique
 
 
+def split_terms(value):
+    """把設定值正規化成乾淨的關鍵字 list。
+
+    接受逗號分隔字串 (CLI 用) 或字串清單 (JSON 設定檔用),兩者皆可。
+    """
+    if not value:
+        return []
+    if isinstance(value, str):
+        value = value.split(",")
+    return [str(s).strip() for s in value if str(s).strip()]
+
+
+def as_comma(value):
+    """把設定值 (字串或清單) 轉成逗號分隔字串,供 resolve_* 使用。"""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ",".join(str(v) for v in value)
+    return str(value)
+
+
+def field_title(job):
+    return job.get("jobName") or ""
+
+
+def field_company(job):
+    return job.get("custName") or ""
+
+
+def field_industry(job):
+    return job.get("coIndustryDesc") or ""
+
+
+def field_keyword(job):
+    """整則職缺的可搜尋文字 (職稱 + 描述 + 公司 + 業種)。
+
+    供「包含/排除關鍵字」做廣域比對,與只比對職稱的 title 過濾區隔開來。
+    """
+    return " ".join([
+        job.get("jobName") or "",
+        job.get("description") or "",
+        job.get("custName") or "",
+        job.get("coIndustryDesc") or "",
+    ])
+
+
+def apply_filter(jobs, terms, accessor, mode, label):
+    """套用一組「包含/排除」過濾並回傳剩餘職缺。
+
+    mode='include' → 只保留含任一 term 者;mode='exclude' → 濾掉含任一 term 者。
+    用「包含」(substring) 比對,大小寫敏感。terms 為空時原樣回傳。
+    """
+    if not terms:
+        return jobs
+    before = len(jobs)
+    if mode == "include":
+        kept = [j for j in jobs if any(t in accessor(j) for t in terms)]
+        verb = "只保留"
+    else:
+        kept = [j for j in jobs if not any(t in accessor(j) for t in terms)]
+        verb = "排除"
+    print(f"已{verb} {label} {'、'.join(terms)}:{before} → {len(kept)} 筆。")
+    return kept
+
+
+def job_id_from_url(url):
+    """從 104 職缺網址抽出職缺 ID (網址內 /job/<id> 的部分)。
+
+    抽不出時回傳去頭尾空白的原字串,讓使用者也能直接貼 ID。
+    用 ID 比對可同時吃完整網址 (含 ?jobsource=... 等查詢字串) 與裸 ID。
+    """
+    m = re.search(r"/job/([A-Za-z0-9]+)", url or "")
+    return m.group(1) if m else (url or "").strip()
+
+
+def load_url_lines(path):
+    """從文字檔讀取要排除的職缺網址,一行一個;空行與 # 開頭(註解)略過。"""
+    try:
+        # utf-8-sig 可同時吃帶/不帶 BOM 的檔
+        with open(path, encoding="utf-8-sig") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        sys.exit(f"找不到排除網址清單檔: {path}")
+    urls = []
+    for line in lines:
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        urls.append(s)
+    return urls
+
+
+def filter_exclude_urls(jobs, exclude_urls):
+    """濾掉網址(職缺 ID)落在排除清單內的職缺。exclude_urls 為空時原樣回傳。"""
+    if not exclude_urls:
+        return jobs
+    ids = {job_id_from_url(u) for u in exclude_urls}
+    before = len(jobs)
+    kept = [j for j in jobs if job_id_from_url(format_link(j)) not in ids]
+    print(f"已排除指定網址職缺:{before} → {len(kept)} 筆 (清單 {len(ids)} 筆)。")
+    return kept
+
+
+def load_config(path):
+    """讀取 JSON 設定檔,回傳 dict。最外層須為 JSON 物件 {...}。"""
+    import json
+    try:
+        # utf-8-sig 可同時吃帶/不帶 BOM 的檔 (Windows 記事本常存成帶 BOM)
+        with open(path, encoding="utf-8-sig") as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        sys.exit(f"找不到設定檔: {path}")
+    except json.JSONDecodeError as e:
+        sys.exit(f"設定檔 JSON 格式錯誤 ({path}): {e}")
+    if not isinstance(cfg, dict):
+        sys.exit("設定檔最外層必須是 JSON 物件 {...}")
+    return cfg
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="搜尋 104 人力銀行職缺",
@@ -395,45 +515,102 @@ def main():
             "  python search104.py python\n"
             "  python search104.py 後端工程師 --area 台北市,新北市\n"
             "  python search104.py --jobcat 軟體工程師,後端工程師,全端工程師 --area 台北市,新北市 --xlsx jobs.xlsx\n"
-            "  python search104.py Java --jobcat 後端工程師,全端工程師 --area 台北市 --group"
+            "  python search104.py Java --jobcat 後端工程師,全端工程師 --area 台北市 --group\n"
+            "  python search104.py --config search.json   # 從 JSON 設定檔讀取所有條件\n"
+            "\n"
+            "註: CLI 參數會覆蓋設定檔中的同名欄位。"
         ),
     )
-    parser.add_argument("keyword", nargs="?", default="", help="搜尋關鍵字 (可省略,改用 --jobcat 篩選)")
-    parser.add_argument("--area", default="", help="地區,逗號分隔城市名或代碼 (例: 台北市,新北市)")
+    parser.add_argument("keyword", nargs="?", default=None, help="搜尋關鍵字 (可省略,改用 --jobcat 篩選)")
+    parser.add_argument("--config", metavar="檔名", help="從 JSON 設定檔讀取條件 (例: --config search.json)")
+    parser.add_argument("--area", default=None, help="地區,逗號分隔城市名或代碼 (例: 台北市,新北市)")
     parser.add_argument(
         "--jobcat",
-        default="",
+        default=None,
         help="職務類別,逗號分隔名稱或代碼 (例: 軟體工程師,後端工程師,全端工程師)",
     )
+    # 包含/排除過濾 (皆用「包含」substring 比對,大小寫敏感,逗號分隔)
     parser.add_argument(
-        "--exclude-industry",
-        default="",
-        dest="exclude_industry",
-        help="排除業種,逗號分隔關鍵字 (例: 人力派遣,銀行);用「包含」比對",
+        "--include-keyword", default=None, dest="include_keyword",
+        help="只保留整則職缺文字 (職稱+描述+公司+業種) 含任一關鍵字者",
     )
     parser.add_argument(
-        "--exclude-company",
-        default="",
-        dest="exclude_company",
-        help="排除公司,逗號分隔關鍵字 (例: 鴻海,人力銀行);用「包含」比對公司名",
+        "--exclude-keyword", default=None, dest="exclude_keyword",
+        help="排除整則職缺文字含任一關鍵字者",
     )
     parser.add_argument(
-        "--exclude-title",
-        default="",
-        dest="exclude_title",
-        help="排除職稱,逗號分隔關鍵字 (例: 實習,儲備,工讀);用「包含」比對職缺名稱",
+        "--include-industry", default=None, dest="include_industry",
+        help="只保留業種含任一關鍵字者 (例: 電腦軟體,資訊服務)",
+    )
+    parser.add_argument(
+        "--exclude-industry", default=None, dest="exclude_industry",
+        help="排除業種含任一關鍵字者 (例: 人力派遣,銀行)",
+    )
+    parser.add_argument(
+        "--include-company", default=None, dest="include_company",
+        help="只保留公司名含任一關鍵字者",
+    )
+    parser.add_argument(
+        "--exclude-company", default=None, dest="exclude_company",
+        help="排除公司名含任一關鍵字者 (例: 鴻海,人力銀行)",
+    )
+    parser.add_argument(
+        "--include-title", default=None, dest="include_title",
+        help="只保留職稱含任一關鍵字者 (例: 後端,Backend)",
+    )
+    parser.add_argument(
+        "--exclude-title", default=None, dest="exclude_title",
+        help="排除職稱含任一關鍵字者 (例: 實習,儲備,工讀)",
+    )
+    parser.add_argument(
+        "--exclude-url", default=None, dest="exclude_url",
+        help="排除指定職缺網址 (或職缺ID),逗號分隔;例: https://www.104.com.tw/job/8yto7",
+    )
+    parser.add_argument(
+        "--exclude-url-file", default=None, dest="exclude_url_file",
+        help="從文字檔讀取要排除的職缺網址,一行一個 (# 開頭為註解)",
     )
     parser.add_argument("--group", action="store_true", help="依公司分組顯示,並附公司職缺數排行")
     parser.add_argument("--xlsx", metavar="檔名", help="匯出結果到 xlsx 檔 (例: --xlsx java.xlsx)")
     args = parser.parse_args()
 
-    if not args.keyword and not args.jobcat:
-        sys.exit("請至少提供關鍵字或 --jobcat 職務類別其一。")
+    cfg = load_config(args.config) if args.config else {}
 
-    area_code = resolve_areas(args.area)
-    jobcat_code = resolve_jobcats(args.jobcat)
+    def pick(cli_val, key):
+        """CLI 值優先,未提供 (None) 時退回設定檔的同名欄位。"""
+        return cli_val if cli_val is not None else cfg.get(key)
 
-    jobs, total_count = search(args.keyword, area_code, jobcat_code)
+    keyword = (pick(args.keyword, "keyword") or "").strip()
+    area = pick(args.area, "area")
+    jobcat = pick(args.jobcat, "jobcat")
+    group = args.group or bool(cfg.get("group"))
+    xlsx = pick(args.xlsx, "xlsx")
+
+    # 排除網址清單: 合併 CLI/設定檔的直接清單與檔案來源
+    exclude_urls = split_terms(pick(args.exclude_url, "exclude_url"))
+    url_file = pick(args.exclude_url_file, "exclude_url_file")
+    if url_file:
+        exclude_urls += load_url_lines(url_file)
+
+    # 八組過濾條件: (terms, 欄位存取器, 模式, 中文標籤),依序套用
+    filter_specs = [
+        (split_terms(pick(args.include_keyword, "include_keyword")), field_keyword, "include", "關鍵字"),
+        (split_terms(pick(args.exclude_keyword, "exclude_keyword")), field_keyword, "exclude", "關鍵字"),
+        (split_terms(pick(args.include_industry, "include_industry")), field_industry, "include", "業種"),
+        (split_terms(pick(args.exclude_industry, "exclude_industry")), field_industry, "exclude", "業種"),
+        (split_terms(pick(args.include_company, "include_company")), field_company, "include", "公司"),
+        (split_terms(pick(args.exclude_company, "exclude_company")), field_company, "exclude", "公司"),
+        (split_terms(pick(args.include_title, "include_title")), field_title, "include", "職稱"),
+        (split_terms(pick(args.exclude_title, "exclude_title")), field_title, "exclude", "職稱"),
+    ]
+
+    if not keyword and not jobcat:
+        sys.exit("請至少提供關鍵字或 --jobcat 職務類別其一 (可寫在設定檔或 CLI)。")
+
+    area_code = resolve_areas(as_comma(area))
+    jobcat_code = resolve_jobcats(as_comma(jobcat))
+
+    jobs, total_count = search(keyword, area_code, jobcat_code)
 
     if not jobs:
         print("查無職缺,試試其他關鍵字或地區。")
@@ -444,49 +621,24 @@ def main():
     if len(jobs) < before_dedupe:
         print(f"已去除 {before_dedupe - len(jobs)} 筆重複職缺 (同一網址),剩 {len(jobs)} 筆。")
 
-    if args.exclude_industry:
-        excludes = [s.strip() for s in args.exclude_industry.split(",") if s.strip()]
-        before = len(jobs)
-        jobs = [
-            j for j in jobs
-            if not any(ex in (j.get("coIndustryDesc") or "") for ex in excludes)
-        ]
-        print(f"已排除業種 {'、'.join(excludes)}:濾掉 {before - len(jobs)} 筆,剩 {len(jobs)} 筆。")
-        if not jobs:
-            print("排除後已無職缺。")
-            return
-
-    if args.exclude_company:
-        excludes = [s.strip() for s in args.exclude_company.split(",") if s.strip()]
-        before = len(jobs)
-        jobs = [
-            j for j in jobs
-            if not any(ex in (j.get("custName") or "") for ex in excludes)
-        ]
-        print(f"已排除公司 {'、'.join(excludes)}:濾掉 {before - len(jobs)} 筆,剩 {len(jobs)} 筆。")
-        if not jobs:
-            print("排除後已無職缺。")
-            return
-
-    if args.exclude_title:
-        excludes = [s.strip() for s in args.exclude_title.split(",") if s.strip()]
-        before = len(jobs)
-        jobs = [
-            j for j in jobs
-            if not any(ex in (j.get("jobName") or "") for ex in excludes)
-        ]
-        print(f"已排除職稱 {'、'.join(excludes)}:濾掉 {before - len(jobs)} 筆,剩 {len(jobs)} 筆。")
-        if not jobs:
-            print("排除後已無職缺。")
-            return
-
-    if args.xlsx:
-        write_xlsx(jobs, args.xlsx)
-        if args.group:
-            write_group_xlsx(jobs, group_xlsx_path(args.xlsx))
+    jobs = filter_exclude_urls(jobs, exclude_urls)
+    if not jobs:
+        print("篩選後已無職缺。")
         return
 
-    if args.group:
+    for terms, accessor, mode, label in filter_specs:
+        jobs = apply_filter(jobs, terms, accessor, mode, label)
+        if not jobs:
+            print("篩選後已無職缺。")
+            return
+
+    if xlsx:
+        write_xlsx(jobs, xlsx)
+        if group:
+            write_group_xlsx(jobs, group_xlsx_path(xlsx))
+        return
+
+    if group:
         print_grouped(jobs, total_count)
     else:
         print_flat(jobs, total_count)
