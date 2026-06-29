@@ -1,0 +1,21 @@
+{
+  "region": "新竹縣",
+  "section": "54",
+  "kind": "分租套房",
+  "price_min": 5000,
+  "price_max": 10000,
+  "room": "1",
+  "area_min": 0,
+  "area_max": 10,
+  "floor": "1樓",
+  "toilet": "1",
+  "shape": "公寓",
+
+  "features": ["newPost"],
+  "equipment": ["cold"],
+  "fitment": "",
+  "included_fees": [],
+  "notice": ["all_sex"],
+
+  "max_rows": 60
+}

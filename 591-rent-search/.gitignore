@@ -1,0 +1,5 @@
+# 個人化租屋設定,不追蹤
+# 範例檔 *.example.* 仍會追蹤,供他人參考
+search.json
+.venv/
+.idea/
