@@ -48,6 +48,7 @@ python search591.py --config search.json
 | `--exclude-url` | `exclude_url` | 排除指定物件網址(或物件ID),逗號分隔 |
 | `--exclude-url-file` | `exclude_url_file` | 從文字檔讀取要排除的物件網址,一行一個 |
 | `--max-rows` | `max_rows` | 最多抓取筆數,預設 60 筆(每頁 30 筆,自動翻頁) |
+| `--xlsx` | `xlsx` | 匯出結果到 xlsx 檔,**不**在終端機印出表格 |
 
 `region`/`section`/`room`/`floor`/`toilet`/`shape`/`fitment`/`notice`/`features`/
 `equipment`/`included_fees` 皆可直接填中文名稱,程式會自動轉換成 591 內部代碼;

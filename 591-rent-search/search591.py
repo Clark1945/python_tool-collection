@@ -297,6 +297,35 @@ def print_flat(items):
     print(f"共 {len(items)} 筆。")
 
 
+def new_workbook():
+    """建立一個 openpyxl Workbook (套件缺失時給出安裝提示)。"""
+    try:
+        from openpyxl import Workbook
+    except ImportError:
+        sys.exit("缺少套件 openpyxl,請先執行: pip install -r requirements.txt")
+    return Workbook()
+
+
+def save_workbook(wb, path):
+    """儲存 Workbook,並把常見的「檔案開在 Excel 中」錯誤轉成易懂訊息。"""
+    try:
+        wb.save(path)
+    except OSError as e:
+        sys.exit(f"寫入 Excel 失敗 (檔案是否開在 Excel 中?): {e}")
+
+
+def write_xlsx(items, path):
+    """將搜尋結果寫入 xlsx,不在終端機印出表格。"""
+    wb = new_workbook()
+    ws = wb.active
+    ws.title = "租屋物件"
+    ws.append(DETAIL_HEADERS)
+    for row in build_rows(items):
+        ws.append(row)
+    save_workbook(wb, path)
+    print(f"已匯出 {len(items)} 筆物件到 {path}")
+
+
 def item_id_from_url(url):
     """從 591 物件網址抽出物件 ID (網址結尾的數字)。
 
@@ -356,6 +385,7 @@ def main():
             "  python search591.py --region 新竹縣 --kind 分租套房 --price-min 5000 --price-max 10000\n"
             "  python search591.py --config search.json   # 從 JSON 設定檔讀取所有條件\n"
             "  python search591.py --config search.json --exclude-url-file seen.txt   # 排除已看過的物件\n"
+            "  python search591.py --config search.json --xlsx rent.xlsx   # 存成 Excel 檔,不印出來\n"
             "\n"
             "註: CLI 參數會覆蓋設定檔中的同名欄位。"
         ),
@@ -398,6 +428,7 @@ def main():
         help="從文字檔讀取要排除的物件網址,一行一個 (# 開頭為註解)",
     )
     parser.add_argument("--max-rows", dest="max_rows", type=int, default=None, help="最多抓取筆數,預設 60 筆")
+    parser.add_argument("--xlsx", metavar="檔名", help="匯出結果到 xlsx 檔,不在終端機印出表格 (例: --xlsx rent.xlsx)")
     args = parser.parse_args()
 
     cfg = load_config(args.config) if args.config else {}
@@ -428,6 +459,7 @@ def main():
     if url_file:
         exclude_urls += load_url_lines(url_file)
     exclude_ids = {item_id_from_url(u) for u in exclude_urls}
+    xlsx = pick(args.xlsx, "xlsx")
 
     params = {
         "order": "posttime",
@@ -468,7 +500,10 @@ def main():
         print("沒有找到符合條件的物件。")
         return
 
-    print_flat(items)
+    if xlsx:
+        write_xlsx(items, xlsx)
+    else:
+        print_flat(items)
 
 
 if __name__ == "__main__":
