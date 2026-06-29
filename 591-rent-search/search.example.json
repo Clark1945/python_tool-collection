@@ -4,18 +4,18 @@
   "kind": "分租套房",
   "price_min": 5000,
   "price_max": 10000,
-  "room": "1",
+  "room": "1房",
   "area_min": 0,
   "area_max": 10,
-  "floor": "1樓",
-  "toilet": "1",
+  "floor": "1層",
+  "toilet": "1衛",
   "shape": "公寓",
 
-  "features": ["newPost"],
-  "equipment": ["cold"],
-  "fitment": "",
-  "included_fees": [],
-  "notice": ["all_sex"],
+  "features": ["新上架", "近捷運"],
+  "equipment": ["有冷氣"],
+  "fitment": "新裝潢",
+  "included_fees": ["管理費"],
+  "notice": ["男女皆可"],
 
   "max_rows": 60
 }

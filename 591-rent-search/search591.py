@@ -5,9 +5,8 @@
 並在終端機以表格呈現。此 API 不需要 CSRF token 或登入 cookie,
 但仍用 curl_cffi 偽裝 Chrome 的 TLS 指紋以降低被擋的機率。
 
-部分篩選條件 (特色/設備/裝潢/租金含/須知) 591 前端送出的是不透明的內部
-代碼字串,沒有公開文件,因此這些欄位開放直接傳入「原始代碼」,代碼可從
-瀏覽器 F12 Network 面板複製實際送出的請求網址取得 (詳見 README)。
+特色/設備/裝潢/租金含/須知這幾類篩選的代碼表是從 591 前端 JS bundle
+(filter 設定物件) 直接挖出來的完整清單,所有選項皆可用中文名稱輸入。
 """
 
 import argparse
@@ -66,23 +65,130 @@ KIND_CODES = {
     "雅房": "4",
 }
 
-# 型態代碼(591 shape,依畫面勾選順序推測,僅「公寓」實測確認過)
+# 型態代碼(591 shape)
 SHAPE_CODES = {
     "公寓": "1",
     "電梯大樓": "2",
     "透天厝": "3",
     "別墅": "4",
+    "店面": "8",
 }
 
-# 樓層區間代碼(591 multiFloor,依畫面勾選順序推測,僅「1樓」實測確認過)
-FLOOR_PRESETS = {
-    "1樓": "1_1",
-    "2-6樓": "2_6",
-    "6-12樓": "6_12",
-    "12樓以上": "12_",
+# 格局(房數)代碼(591 layout,送出時對應 multiRoom)
+ROOM_CODES = {
+    "1房": "1",
+    "2房": "2",
+    "3房": "3",
+    "4房以上": "4",
+}
+
+# 樓層區間代碼(591 floor,送出時對應 multiFloor)
+FLOOR_CODES = {
+    "1層": "1_1",
+    "2-6層": "2_6",
+    "6-12層": "6_12",
+    "12層以上": "13_",
+}
+
+# 衛浴數量代碼(591 multiToilet)
+TOILET_CODES = {
+    "1衛": "1",
+    "2衛": "2",
+    "3衛": "3",
+    "4衛及以上": "4_",
+}
+
+# 裝潢程度代碼(591 fitment,租屋版選項)
+FITMENT_CODES = {
+    "新裝潢": "99",
+    "中檔裝潢": "3",
+    "高檔裝潢": "4",
+}
+
+# 租金含項目代碼(591 priceadd)
+INCLUDED_FEE_CODES = {
+    "管理費": "4",
+    "水費": "1",
+    "電費": "2",
+    "網路費": "6",
+    "第四台": "5",
+    "瓦斯費": "3",
+    "清潔費": "7",
+    "車位租金": "199",
+}
+
+# 須知代碼(591 notice,送出時對應 multiNotice)
+NOTICE_CODES = {
+    "男女皆可": "all_sex",
+    "限男生": "boy",
+    "限女生": "girl",
+    "排除頂樓加蓋": "not_cover",
+}
+
+# 設備代碼(591 option)
+EQUIPMENT_CODES = {
+    "有冷氣": "cold",
+    "有洗衣機": "washer",
+    "有冰箱": "icebox",
+    "有熱水器": "hotwater",
+    "有天然瓦斯": "naturalgas",
+    "有網路": "broadband",
+    "床": "bed",
+    "有衣櫃": "wardrobe",
+}
+
+# 特色代碼(591 other)
+FEATURE_CODES = {
+    "優選好屋": "best_house",
+    "屋主直租": "host",
+    "影片賞屋": "video",
+    "AI影音講房": "ai_video",
+    "新上架": "newPost",
+    "可養寵物": "pet",
+    "可開伙": "cook",
+    "有車位": "cartplace",
+    "近捷運": "near_subway",
+    "有陽台": "balcony_1",
+    "有電梯": "lift",
+    "可短期租賃": "lease",
+    "免服務費": "no-service-fee",
+    "降價物件": "downPrice",
+    "免押金": "no-deposit",
+    "押一付一": "one-month-deposit",
+    "社會住宅": "social-housing",
+    "非社會住宅": "non-social-housing",
+    "租金補貼": "rental-subsidy",
+    "高齡友善": "elderly-friendly",
+    "可報稅": "tax-deductible",
+    "可入籍": "naturalization",
 }
 
 DETAIL_HEADERS = ["標題", "地址", "類型", "坪數", "樓層", "租金", "更新時間", "連結"]
+
+
+def resolve_multi_codes(value, table, label):
+    """將使用者輸入(中文名/代碼/逗號分隔多選)轉成逗號分隔的代碼字串。"""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, str):
+        items = value.split(",")
+    elif isinstance(value, list):
+        items = value
+    else:
+        items = [value]
+    codes = []
+    for raw in items:
+        name = str(raw).strip()
+        if not name:
+            continue
+        if name in table:
+            codes.append(table[name])
+        elif name in table.values():
+            codes.append(name)
+        else:
+            supported = "、".join(table.keys())
+            sys.exit(f"不支援的{label}: '{name}'\n支援的選項: {supported}\n(或直接傳入代碼)")
+    return ",".join(codes)
 
 
 def resolve_code(value, table, label):
@@ -96,16 +202,6 @@ def resolve_code(value, table, label):
         return table[value]
     supported = "、".join(table.keys())
     sys.exit(f"不支援的{label}: '{value}'\n支援的選項: {supported}\n(或直接傳入代碼)")
-
-
-def resolve_floor(value):
-    """將樓層輸入(中文預設名或 591 原始 'min_max' 代碼)轉成 multiFloor 參數值。"""
-    if not value:
-        return ""
-    value = str(value).strip()
-    if value in FLOOR_PRESETS:
-        return FLOOR_PRESETS[value]
-    return value  # 視為使用者已知道的原始代碼 (例如 "2_6")
 
 
 def as_comma(value):
@@ -224,31 +320,28 @@ def main():
     parser.add_argument("--kind", default=None, help="房屋類型: 整層住家、獨立套房、分租套房、雅房 (或代碼)")
     parser.add_argument("--price-min", dest="price_min", default=None, help="最低租金")
     parser.add_argument("--price-max", dest="price_max", default=None, help="最高租金")
-    parser.add_argument("--room", default=None, help="格局(房數): 1、2、3、4 (4 代表 4房以上)")
+    parser.add_argument("--room", default=None, help="格局: 1房、2房、3房、4房以上 (或代碼)")
     parser.add_argument("--area-min", dest="area_min", default=None, help="最小坪數")
     parser.add_argument("--area-max", dest="area_max", default=None, help="最大坪數")
-    parser.add_argument(
-        "--floor", default=None,
-        help="樓層區間: 1樓、2-6樓、6-12樓、12樓以上 (或直接傳入原始代碼,例: 2_6)",
-    )
-    parser.add_argument("--toilet", default=None, help="衛浴數量代碼 (數字)")
-    parser.add_argument("--shape", default=None, help="型態: 公寓、電梯大樓、透天厝、別墅 (或代碼,僅公寓已實測確認)")
+    parser.add_argument("--floor", default=None, help="樓層: 1層、2-6層、6-12層、12層以上 (或代碼)")
+    parser.add_argument("--toilet", default=None, help="衛浴: 1衛、2衛、3衛、4衛及以上 (或代碼)")
+    parser.add_argument("--shape", default=None, help="型態: 公寓、電梯大樓、透天厝、別墅、店面 (或代碼)")
     parser.add_argument(
         "--features", default=None,
-        help="特色,逗號分隔的 591 原始代碼 (例: newPost,已知「新上架」=newPost)",
+        help="特色,逗號分隔的中文名稱或代碼 (例: 新上架,近捷運,可養寵物,可開伙,有車位,有電梯...)",
     )
     parser.add_argument(
         "--equipment", default=None,
-        help="設備,逗號分隔的 591 原始代碼 (例: cold,已知「有冷氣」=cold)",
+        help="設備,逗號分隔的中文名稱或代碼 (例: 有冷氣,有洗衣機,有冰箱,有熱水器,有天然瓦斯,有網路)",
     )
-    parser.add_argument("--fitment", default=None, help="裝潢程度的 591 原始代碼")
+    parser.add_argument("--fitment", default=None, help="裝潢: 新裝潢、中檔裝潢、高檔裝潢 (或代碼)")
     parser.add_argument(
         "--included-fees", dest="included_fees", default=None,
-        help="租金含項目,逗號分隔的 591 原始代碼",
+        help="租金含項目,逗號分隔的中文名稱或代碼 (例: 管理費,水費,電費,網路費,第四台,瓦斯費,清潔費,車位租金)",
     )
     parser.add_argument(
         "--notice", default=None,
-        help="須知,逗號分隔的 591 原始代碼 (例: all_sex,boy,girl)",
+        help="須知,逗號分隔的中文名稱或代碼 (例: 男女皆可,限男生,限女生,排除頂樓加蓋)",
     )
     parser.add_argument("--max-rows", dest="max_rows", type=int, default=None, help="最多抓取筆數,預設 60 筆")
     args = parser.parse_args()
@@ -260,16 +353,16 @@ def main():
 
     region_code = resolve_code(pick(args.region, "region"), REGION_CODES, "縣市")
     kind_code = resolve_code(pick(args.kind, "kind"), KIND_CODES, "房屋類型")
-    shape_code = resolve_code(pick(args.shape, "shape"), SHAPE_CODES, "型態")
-    floor_code = resolve_floor(pick(args.floor, "floor"))
+    shape_code = resolve_multi_codes(pick(args.shape, "shape"), SHAPE_CODES, "型態")
+    floor_code = resolve_multi_codes(pick(args.floor, "floor"), FLOOR_CODES, "樓層")
+    room_code = resolve_multi_codes(pick(args.room, "room"), ROOM_CODES, "格局")
+    toilet_code = resolve_multi_codes(pick(args.toilet, "toilet"), TOILET_CODES, "衛浴")
+    fitment_code = resolve_multi_codes(pick(args.fitment, "fitment"), FITMENT_CODES, "裝潢")
+    included_fees = resolve_multi_codes(pick(args.included_fees, "included_fees"), INCLUDED_FEE_CODES, "租金含項目")
+    notice = resolve_multi_codes(pick(args.notice, "notice"), NOTICE_CODES, "須知")
+    equipment = resolve_multi_codes(pick(args.equipment, "equipment"), EQUIPMENT_CODES, "設備")
+    features = resolve_multi_codes(pick(args.features, "features"), FEATURE_CODES, "特色")
     section_code = as_comma(pick(args.section, "section"))
-    room_code = as_comma(pick(args.room, "room"))
-    toilet_code = as_comma(pick(args.toilet, "toilet"))
-    features = as_comma(pick(args.features, "features"))
-    equipment = as_comma(pick(args.equipment, "equipment"))
-    fitment_code = as_comma(pick(args.fitment, "fitment"))
-    included_fees = as_comma(pick(args.included_fees, "included_fees"))
-    notice = as_comma(pick(args.notice, "notice"))
 
     price_range = build_range_param(pick(args.price_min, "price_min"), pick(args.price_max, "price_max"))
     area_range = build_range_param(pick(args.area_min, "area_min"), pick(args.area_max, "area_max"))

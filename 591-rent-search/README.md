@@ -4,6 +4,9 @@
 在終端機以表格呈現。此 API 不需要登入或 CSRF token,但仍使用 `curl_cffi`
 偽裝 Chrome TLS 指紋以降低被擋的機率。
 
+所有篩選條件(含特色/設備/裝潢/租金含/須知)皆已對應成中文名稱,代碼表是
+直接從 591 前端 JS 原始碼挖出來的完整清單,不需要自己用瀏覽器複製網址。
+
 ## 安裝
 
 ```bash
@@ -29,20 +32,25 @@ python search591.py --config search.json
 | CLI 參數 | JSON 欄位 | 說明 |
 |---|---|---|
 | `--region` | `region` | 縣市名稱或代碼,例如 `台北市` 或 `1` |
-| `--section` | `section` | 鄉鎮/區代碼(數字) |
-| `--kind` | `kind` | 房屋類型: 整層住家、獨立套房、分租套房、雅房(或代碼) |
+| `--section` | `section` | 鄉鎮/區代碼(數字,從網址 `sectionid` 取得) |
+| `--kind` | `kind` | 房屋類型: 整層住家、獨立套房、分租套房、雅房 |
 | `--price-min` / `--price-max` | `price_min` / `price_max` | 租金範圍(元) |
-| `--room` | `room` | 格局(房數): 1、2、3、4(代表 4 房以上) |
+| `--room` | `room` | 格局: 1房、2房、3房、4房以上 |
 | `--area-min` / `--area-max` | `area_min` / `area_max` | 坪數範圍 |
-| `--floor` | `floor` | 樓層區間: `1樓`、`2-6樓`、`6-12樓`、`12樓以上`(或原始代碼) |
-| `--toilet` | `toilet` | 衛浴數量代碼 |
-| `--shape` | `shape` | 型態: 公寓、電梯大樓、透天厝、別墅(或代碼) |
-| `--features` | `features` | 特色,591 原始代碼,逗號分隔 |
-| `--equipment` | `equipment` | 設備,591 原始代碼,逗號分隔 |
-| `--fitment` | `fitment` | 裝潢程度,591 原始代碼 |
-| `--included-fees` | `included_fees` | 租金含項目,591 原始代碼,逗號分隔 |
-| `--notice` | `notice` | 須知,591 原始代碼,逗號分隔 |
+| `--floor` | `floor` | 樓層: 1層、2-6層、6-12層、12層以上 |
+| `--toilet` | `toilet` | 衛浴: 1衛、2衛、3衛、4衛及以上 |
+| `--shape` | `shape` | 型態: 公寓、電梯大樓、透天厝、別墅、店面 |
+| `--features` | `features` | 特色,中文名稱或代碼,逗號分隔(見下表) |
+| `--equipment` | `equipment` | 設備,中文名稱或代碼,逗號分隔(見下表) |
+| `--fitment` | `fitment` | 裝潢: 新裝潢、中檔裝潢、高檔裝潢 |
+| `--included-fees` | `included_fees` | 租金含項目,中文名稱或代碼,逗號分隔(見下表) |
+| `--notice` | `notice` | 須知: 男女皆可、限男生、限女生、排除頂樓加蓋 |
 | `--max-rows` | `max_rows` | 最多抓取筆數,預設 60 筆(每頁 30 筆,自動翻頁) |
+
+`region`/`section`/`room`/`floor`/`toilet`/`shape`/`fitment`/`notice`/`features`/
+`equipment`/`included_fees` 皆可直接填中文名稱,程式會自動轉換成 591 內部代碼;
+也可以直接填代碼。JSON 設定檔裡可多選的欄位(features/equipment/included_fees/
+notice)請用陣列,例如 `["新上架", "近捷運"]`。
 
 ### 支援的縣市代碼
 
@@ -52,24 +60,16 @@ python search591.py --config search.json
 
 (花蓮縣、澎湖縣、金門縣、連江縣代碼未確認,可直接嘗試代入數字代碼)
 
-### 房屋類型 / 型態代碼
+### 特色(`--features`)
 
-- `kind`(類型): 整層住家=1、獨立套房=2、分租套房=3、雅房=4
-- `shape`(型態): 公寓=1(已實測確認)、電梯大樓=2、透天厝=3、別墅=4(後三者依畫面勾選順序推測,未逐一實測,如不準請改用「取得原始代碼」的方式自行確認)
+新上架、近捷運、可養寵物、可開伙、有車位、有電梯、優選好屋、屋主直租、
+影片賞屋、AI影音講房、有陽台、可短期租賃、免服務費、降價物件、免押金、
+押一付一、社會住宅、非社會住宅、租金補貼、高齡友善、可報稅、可入籍
 
-### 特色 / 設備 / 裝潢 / 租金含 / 須知 — 不透明代碼
+### 設備(`--equipment`)
 
-591 這幾類篩選的代碼是前端內部字串,沒有公開文件,目前已知:
+有冷氣、有洗衣機、有冰箱、有熱水器、有天然瓦斯、有網路、床、有衣櫃
 
-- `features`(特色): 新上架 = `newPost`
-- `equipment`(設備): 有冷氣 = `cold`
-- `notice`(須知): 男女皆可 = `all_sex`、限男生 = `boy`(限女生推測為 `girl`,未實測確認)
-- `fitment`(裝潢)、`included_fees`(租金含): 目前無已知代碼
+### 租金含項目(`--included-fees`)
 
-#### 如何取得原始代碼
-
-1. 用 Chrome 開啟 591 租屋搜尋頁,按 F12 打開開發者工具,切到 Network 分頁,勾選「保留紀錄檔」
-2. 在畫面上勾選你想知道代碼的那個篩選項目(一次勾一個,方便比對)
-3. 按搜尋,在請求清單找到 `rent/list` 的請求,複製 Request URL
-4. 比對網址上新增的參數(例如 `other=xxx`、`option=xxx`、`fitment=xxx`、`priceadd=xxx`、`multiNotice=xxx`),那就是該選項的代碼
-5. 把代碼填入 CLI 參數或 `search.json` 即可重複使用
+管理費、水費、電費、網路費、第四台、瓦斯費、清潔費、車位租金
