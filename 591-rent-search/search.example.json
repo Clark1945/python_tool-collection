@@ -17,5 +17,8 @@
   "included_fees": ["管理費"],
   "notice": ["男女皆可"],
 
+  "exclude_url": [],
+  "exclude_url_file": "seen.txt",
+
   "max_rows": 60
 }

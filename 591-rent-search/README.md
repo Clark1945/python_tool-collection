@@ -45,6 +45,8 @@ python search591.py --config search.json
 | `--fitment` | `fitment` | 裝潢: 新裝潢、中檔裝潢、高檔裝潢 |
 | `--included-fees` | `included_fees` | 租金含項目,中文名稱或代碼,逗號分隔(見下表) |
 | `--notice` | `notice` | 須知: 男女皆可、限男生、限女生、排除頂樓加蓋 |
+| `--exclude-url` | `exclude_url` | 排除指定物件網址(或物件ID),逗號分隔 |
+| `--exclude-url-file` | `exclude_url_file` | 從文字檔讀取要排除的物件網址,一行一個 |
 | `--max-rows` | `max_rows` | 最多抓取筆數,預設 60 筆(每頁 30 筆,自動翻頁) |
 
 `region`/`section`/`room`/`floor`/`toilet`/`shape`/`fitment`/`notice`/`features`/
@@ -73,3 +75,12 @@ notice)請用陣列,例如 `["新上架", "近捷運"]`。
 ### 租金含項目(`--included-fees`)
 
 管理費、水費、電費、網路費、第四台、瓦斯費、清潔費、車位租金
+
+## 排除已看過的物件
+
+跟 104 工具一樣,支援用排除清單檔避免重複看到同一筆物件,以物件網址(實際比對
+網址結尾的物件 ID)判斷是否重複。請複製 `seen.example.txt` 為 `seen.txt`,
+把已看過/已聯絡過的物件網址貼進去(一行一個,`#` 開頭為註解),再用
+`--exclude-url-file seen.txt` 或在 `search.json` 設定 `"exclude_url_file": "seen.txt"`。
+
+也可以用 `--exclude-url` 直接帶入單筆或多筆(逗號分隔)網址/ID。

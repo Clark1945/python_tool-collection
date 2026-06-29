@@ -11,6 +11,7 @@
 
 import argparse
 import json
+import re
 import sys
 import time
 
@@ -241,9 +242,15 @@ def fetch_page(params, first_row):
     return data.get("items", []), int(data.get("total", 0))
 
 
-def search(params, max_rows):
-    """逐頁抓取,直到達到 max_rows 或抓完全部資料為止。"""
+def search(params, max_rows, exclude_ids=None):
+    """逐頁抓取,直到達到 max_rows 或抓完全部資料為止。
+
+    若提供 exclude_ids,會在累計筆數時先濾掉已排除的物件,
+    確保 max_rows 是「扣除已看過項目後」實際取得的新筆數。
+    """
+    exclude_ids = exclude_ids or set()
     all_items = []
+    skipped = 0
     first_row = 0
     total = None
     while len(all_items) < max_rows:
@@ -251,14 +258,18 @@ def search(params, max_rows):
         items, total = fetch_page(params, first_row)
         if not items:
             break
-        all_items.extend(items)
+        for it in items:
+            if item_id_from_url(it.get("url", "")) in exclude_ids:
+                skipped += 1
+                continue
+            all_items.append(it)
         first_row += ITEMS_PER_PAGE
         if first_row >= total:
             break
         if len(all_items) < max_rows:
             time.sleep(1)
     if total is not None:
-        print(f"符合條件共 {total} 筆,本次抓取 {min(len(all_items), max_rows)} 筆。", file=sys.stderr)
+        print(f"符合條件共 {total} 筆,本次抓取 {min(len(all_items), max_rows)} 筆(已排除 {skipped} 筆已看過)。", file=sys.stderr)
     return all_items[:max_rows]
 
 
@@ -286,6 +297,42 @@ def print_flat(items):
     print(f"共 {len(items)} 筆。")
 
 
+def item_id_from_url(url):
+    """從 591 物件網址抽出物件 ID (網址結尾的數字)。
+
+    抽不出時回傳去頭尾空白的原字串,讓使用者也能直接貼 ID。
+    用 ID 比對可同時吃完整網址與裸 ID。
+    """
+    m = re.search(r"/(\d+)(?:[/?].*)?$", url or "")
+    return m.group(1) if m else (url or "").strip()
+
+
+def load_url_lines(path):
+    """從文字檔讀取要排除的物件網址,一行一個;空行與 # 開頭(註解)略過。"""
+    try:
+        # utf-8-sig 可同時吃帶/不帶 BOM 的檔
+        with open(path, encoding="utf-8-sig") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        sys.exit(f"找不到排除網址清單檔: {path}")
+    urls = []
+    for line in lines:
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        urls.append(s)
+    return urls
+
+
+def split_terms(value):
+    """把設定值正規化成乾淨的清單。接受逗號分隔字串或字串清單。"""
+    if not value:
+        return []
+    if isinstance(value, str):
+        value = value.split(",")
+    return [str(s).strip() for s in value if str(s).strip()]
+
+
 def load_config(path):
     """讀取 JSON 設定檔,回傳 dict。最外層須為 JSON 物件 {...}。"""
     try:
@@ -308,10 +355,9 @@ def main():
             "範例:\n"
             "  python search591.py --region 新竹縣 --kind 分租套房 --price-min 5000 --price-max 10000\n"
             "  python search591.py --config search.json   # 從 JSON 設定檔讀取所有條件\n"
+            "  python search591.py --config search.json --exclude-url-file seen.txt   # 排除已看過的物件\n"
             "\n"
-            "註: CLI 參數會覆蓋設定檔中的同名欄位。\n"
-            "特色/設備/裝潢/租金含/須知這幾類沒有公開代碼文件,請用瀏覽器 F12\n"
-            "Network 面板複製實際請求網址取得代碼,詳見 README.md。"
+            "註: CLI 參數會覆蓋設定檔中的同名欄位。"
         ),
     )
     parser.add_argument("--config", metavar="檔名", help="從 JSON 設定檔讀取條件 (例: --config search.json)")
@@ -343,6 +389,14 @@ def main():
         "--notice", default=None,
         help="須知,逗號分隔的中文名稱或代碼 (例: 男女皆可,限男生,限女生,排除頂樓加蓋)",
     )
+    parser.add_argument(
+        "--exclude-url", default=None, dest="exclude_url",
+        help="排除指定物件網址 (或物件ID),逗號分隔;例: https://rent.591.com.tw/21528843",
+    )
+    parser.add_argument(
+        "--exclude-url-file", default=None, dest="exclude_url_file",
+        help="從文字檔讀取要排除的物件網址,一行一個 (# 開頭為註解)",
+    )
     parser.add_argument("--max-rows", dest="max_rows", type=int, default=None, help="最多抓取筆數,預設 60 筆")
     args = parser.parse_args()
 
@@ -368,6 +422,12 @@ def main():
     area_range = build_range_param(pick(args.area_min, "area_min"), pick(args.area_max, "area_max"))
 
     max_rows = pick(args.max_rows, "max_rows") or 60
+
+    exclude_urls = split_terms(pick(args.exclude_url, "exclude_url"))
+    url_file = pick(args.exclude_url_file, "exclude_url_file")
+    if url_file:
+        exclude_urls += load_url_lines(url_file)
+    exclude_ids = {item_id_from_url(u) for u in exclude_urls}
 
     params = {
         "order": "posttime",
@@ -402,7 +462,7 @@ def main():
     if notice:
         params["multiNotice"] = notice
 
-    items = search(params, int(max_rows))
+    items = search(params, int(max_rows), exclude_ids)
 
     if not items:
         print("沒有找到符合條件的物件。")
